@@ -207,10 +207,15 @@ def main() -> None:
 
     import webview
 
+    # As big as the Mac window, but never taller than the screen above the taskbar (the footer
+    # with the credit and version must stay visible on 768-pixel laptop screens).
+    screen_width, screen_height = winsys.work_area()
+    width, height = min(820, screen_width - 24), min(760, screen_height - 24)
+    print(f"screen {screen_width}x{screen_height}, window {width}x{height}")
     api = Api()
     window = webview.create_window(
         APP_NAME, f"http://127.0.0.1:{port}/?app=windows", js_api=api,
-        width=820, height=760, min_size=(560, 520), text_select=True,
+        width=width, height=height, min_size=(min(560, width), min(480, height)), text_select=True,
         background_color="#121212" if winsys.dark_mode() else "#F5F4F1")
     window.events.closing += on_closing
     window.events.loaded += on_loaded
@@ -262,6 +267,8 @@ PAGE_STATE = """(() => {
     changeVisible: !$('change').hidden, setupVisible: !$('setup').hidden, setupText: $('setup').innerText,
     downloadDisabled: $('go').disabled, bodyClass: document.body.className, message: $('msg').textContent,
     bridge: !!(window.pywebview && window.pywebview.api), quitAsked: !$('quit').hidden,
+    footerBottom: Math.round(document.querySelector('.credit').getBoundingClientRect().bottom),
+    viewportHeight: window.innerHeight,
     quitText: $('quit-title').textContent, jobs: document.querySelectorAll('.job').length
   };
 })()"""
@@ -309,6 +316,8 @@ def run_selftest(out: Path, tools) -> None:
         wait_for(lambda: not page()["setupVisible"], 15)
         time.sleep(2)
         results["page"] = page()
+        results["window_rect"] = winsys.window_rect(hwnd)
+        results["work_area"] = winsys.work_area()
         results["context_menu"] = on_ui_thread(
             lambda: bool(window.native.browser.webview.CoreWebView2.Settings.AreDefaultContextMenusEnabled))
         winsys.bring_to_front(hwnd)
