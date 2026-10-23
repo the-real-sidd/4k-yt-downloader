@@ -13,6 +13,9 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONUTF8: "1"  # the build machine's console is cp1252; the scripts print ✔, → and file names in any language
+
 concurrency:
   group: windows-${{ github.ref }}
 

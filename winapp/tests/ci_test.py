@@ -341,6 +341,12 @@ def app_port() -> int | None:
         return None
 
 
+def app_env(**extra) -> dict:
+    """The environment a person's PC would give the app (without the build machine's UTF-8 switches)."""
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+    return {**env, **extra}
+
+
 def save_log(name: str) -> None:
     log = LOCAL / f"{APP_NAME}.log"
     if log.exists():
@@ -350,7 +356,8 @@ def save_log(name: str) -> None:
 def app() -> None:
     OUT.mkdir(exist_ok=True)
     setup = ROOT / "dist" / "4K-YT-Downloader-Setup.exe"
-    check("installer was built", setup.is_file(), f"{setup.stat().st_size / 1e6:.1f} MB" if setup.exists() else "")
+    if not check("installer was built", setup.is_file(), f"{setup.stat().st_size / 1e6:.1f} MB" if setup.exists() else ""):
+        return finish("app")
 
     # Install the way people do: the one-line command, here with the installer just built.
     result = powershell("Get-Content -Raw -LiteralPath install.ps1 | Invoke-Expression",
@@ -371,7 +378,7 @@ def app() -> None:
     powershell(f"Set-Clipboard -Value '{link}'")
     selftest = OUT / "selftest"
     started = time.time()
-    process = subprocess.Popen([str(EXE)], env={**os.environ, "YTD_SELFTEST": str(selftest)})
+    process = subprocess.Popen([str(EXE)], env=app_env(YTD_SELFTEST=str(selftest)))
     try:
         code = process.wait(timeout=1500)
     except subprocess.TimeoutExpired:
@@ -409,7 +416,7 @@ def app() -> None:
     # Normal launch: tools are there now, so it's ready at once.
     for leftover in (ROAMING / "port",):
         leftover.unlink(missing_ok=True)
-    first_app = subprocess.Popen([str(EXE)])
+    first_app = subprocess.Popen([str(EXE)], env=app_env())
     port = wait_until(app_port, 60)
     check("second launch starts", bool(port), port)
     if not port:
@@ -417,7 +424,7 @@ def app() -> None:
     state = wait_until(lambda: (call(port, "/api/state").get("setup") or {}).get("ready"), 60)
     check("second launch: ready at once (tools kept)", bool(state))
 
-    second = subprocess.Popen([str(EXE)])
+    second = subprocess.Popen([str(EXE)], env=app_env())
     try:
         second_code = second.wait(timeout=30)
     except subprocess.TimeoutExpired:
