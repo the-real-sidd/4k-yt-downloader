@@ -23,6 +23,12 @@
 #   YTD_FORCE=1            reinstall even if this version is already installed
 set -euo pipefail
 
+# Everything runs inside main(), called on the last line: with `curl … | bash`, bash reads the
+# script from the same pipe the commands inherit as input, and a command that reads its input
+# (Homebrew does, when it updates something) would swallow the rest of the script, which then
+# silently stops. Wrapped in a function, the whole script is read before anything runs.
+main() {
+
 REPO="the-real-sidd/4k-yt-downloader"
 APP="4K YT Downloader"
 OLD_APPS=("YT Downloader")  # names this app had before; removed on update
@@ -69,7 +75,7 @@ if [ -z "${YTD_SKIP_TOOLS:-}" ]; then
     # So `brew` also works in new Terminal windows.
     grep -qs "brew shellenv" "$HOME/.zprofile" || echo "eval \"\$($BREW shellenv)\"" >> "$HOME/.zprofile"
   fi
-  eval "$("$BREW" shellenv)"
+  eval "$("$BREW" shellenv < /dev/null)"
 
   missing=()
   for pair in yt-dlp:yt-dlp ffmpeg:ffmpeg ffprobe:ffmpeg deno:deno python3:python; do
@@ -81,11 +87,11 @@ if [ -z "${YTD_SKIP_TOOLS:-}" ]; then
   done
   if [ ${#missing[@]} -gt 0 ]; then
     step "Installing ${missing[*]} (this can take a few minutes the first time)"
-    "$BREW" install "${missing[@]}"
+    "$BREW" install "${missing[@]}" < /dev/null
   fi
   step "Updating yt-dlp (YouTube changes often)"
-  "$BREW" upgrade yt-dlp >/dev/null 2>&1 || true
-  ok "Tools ready: yt-dlp $(yt-dlp --version 2>/dev/null || echo '?')"
+  "$BREW" upgrade yt-dlp < /dev/null >/dev/null 2>&1 || true
+  ok "Tools ready: yt-dlp $(yt-dlp --version < /dev/null 2>/dev/null || echo '?')"
 fi
 
 # ---------------------------------------------------------------- 2. the app
@@ -104,7 +110,7 @@ else
   curl -fL --progress-bar -o "$TMP/$ASSET" "$URL" || die "Couldn't download $URL. Check your internet connection and try again."
 fi
 
-hdiutil attach -quiet -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$TMP/$ASSET" \
+hdiutil attach -quiet -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$TMP/$ASSET" < /dev/null \
   || die "The download looks damaged. Run the command again."
 [ -d "$MNT/$APP.app" ] || die "The download doesn't contain $APP.app."
 plist_version() { /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$1/Contents/Info.plist" 2>/dev/null || true; }
@@ -172,3 +178,7 @@ if [ -z "${YTD_NO_OPEN:-}" ]; then
   open "$DEST/$APP.app"
 fi
 printf '\n\033[1;32m%s %s is ready.\033[0m Run the same command again any time to update.\n\n' "$APP" "$NEW_VERSION"
+
+}
+
+main "$@"
