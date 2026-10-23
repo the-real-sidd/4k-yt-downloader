@@ -209,13 +209,15 @@ def main() -> None:
 
     # As big as the Mac window, but never taller than the screen above the taskbar (the footer
     # with the credit and version must stay visible on 768-pixel laptop screens).
-    screen_width, screen_height = winsys.work_area()
+    # Windows' own "center on screen" ignores the taskbar, so the position is worked out here.
+    left, top, screen_width, screen_height = winsys.work_area()
     width, height = min(820, screen_width - 24), min(760, screen_height - 24)
-    print(f"screen {screen_width}x{screen_height}, window {width}x{height}")
+    x, y = left + (screen_width - width) // 2, top + (screen_height - height) // 2
+    print(f"screen {screen_width}x{screen_height}, window {width}x{height} at {x},{y}")
     api = Api()
     window = webview.create_window(
         APP_NAME, f"http://127.0.0.1:{port}/?app=windows", js_api=api,
-        width=width, height=height, min_size=(min(560, width), min(480, height)), text_select=True,
+        width=width, height=height, x=x, y=y, min_size=(min(560, width), min(480, height)), text_select=True,
         background_color="#121212" if winsys.dark_mode() else "#F5F4F1")
     window.events.closing += on_closing
     window.events.loaded += on_loaded

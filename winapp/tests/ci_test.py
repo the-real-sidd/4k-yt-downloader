@@ -406,8 +406,8 @@ def app() -> None:
     check("folder is Downloads, and Change is shown", page.get("folder", "").lower().endswith("downloads") and page.get("changeVisible"),
           page.get("folder"))
     check("ready: setup banner gone, Download enabled", not page.get("setupVisible") and not page.get("downloadDisabled"))
-    rect, area = report.get("window_rect") or [0, 0, 0, 0], report.get("work_area") or [0, 0]
-    check("window fits above the taskbar (footer visible)", rect[3] <= area[1] + 10 and rect[1] >= -10,
+    rect, area = report.get("window_rect") or [0, 0, 0, 0], report.get("work_area") or [0, 0, 0, 0]
+    check("window fits above the taskbar (footer visible)", rect[1] >= area[1] - 10 and rect[3] <= area[1] + area[3] + 10,
           {"window": rect, "screen above taskbar": area, "footer bottom / page height": (page.get("footerBottom"), page.get("viewportHeight"))})
     check("copied YouTube link filled in on launch", page.get("url") == link, page.get("url"))
     check("Paste button pastes", report.get("paste_button") == link, report.get("paste_button"))

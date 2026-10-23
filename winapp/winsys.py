@@ -105,17 +105,18 @@ def window_rect(hwnd: int) -> tuple[int, int, int, int]:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
-def work_area() -> tuple[int, int]:
-    """Width and height of the screen above the taskbar, in the sizes the window uses (before
-    display scaling, so 1366x768 at 125% is about 1093x582)."""
+def work_area() -> tuple[int, int, int, int]:
+    """Left, top, width and height of the main screen without the taskbar, in the units the
+    window uses (before display scaling, so 1366x768 at 125% is about 1093x582)."""
     rect = wintypes.RECT()
     if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):  # SPI_GETWORKAREA
-        return 1280, 720
+        return 0, 0, 1280, 720
     try:
         scale = user32.GetDpiForSystem() / 96  # 1.0 until the process says it handles scaling
     except AttributeError:  # Windows 10 before 1607
         scale = 1.0
-    return round((rect.right - rect.left) / scale), round((rect.bottom - rect.top) / scale)
+    return (round(rect.left / scale), round(rect.top / scale),
+            round((rect.right - rect.left) / scale), round((rect.bottom - rect.top) / scale))
 
 
 def message_box(text: str, title: str, flags: int = 0x40) -> int:
