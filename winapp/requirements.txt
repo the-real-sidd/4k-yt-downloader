@@ -1,0 +1,5 @@
+# For building the Windows app (python winapp/build.py). Pinned so builds are repeatable.
+pywebview==6.2.1
+pythonnet==3.2.1
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9

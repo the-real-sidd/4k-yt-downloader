@@ -1,13 +1,14 @@
 """
 ytdl --web: a small page in Chrome for pasting YouTube links.
 
-It runs only on this Mac (127.0.0.1), uses the same download settings as the
+It runs only on this computer (127.0.0.1), uses the same download settings as the
 `ytdl` command, and saves into the folder it was started from (or the one
 given as  ytdl --web <folder>).
 
 The Mac app (tools/macapp) runs this file directly with --app --no-open and shows
 the page in its own window: the folder then comes from the app's saved settings,
 the app's native folder panel sets it, and the server stops when the app quits.
+The Windows app (tools/winapp) imports it and runs create_server(app=True) in a thread.
 """
 
 from __future__ import annotations
@@ -42,8 +43,13 @@ PROGRESS_TEMPLATE = (
     "%(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s"
 )
 
-APP_SUPPORT = Path.home() / "Library" / "Application Support" / "4K YT Downloader"
-OLD_APP_SUPPORT = Path.home() / "Library" / "Application Support" / "YT Downloader"  # before 3.0
+APP_NAME = "4K YT Downloader"
+if ytdl.IS_WINDOWS:
+    APP_SUPPORT = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / APP_NAME
+    OLD_APP_SUPPORT = APP_SUPPORT
+else:
+    APP_SUPPORT = Path.home() / "Library" / "Application Support" / APP_NAME
+    OLD_APP_SUPPORT = Path.home() / "Library" / "Application Support" / "YT Downloader"  # before 3.0
 SETTINGS_FILE = APP_SUPPORT / "settings.json"
 PORT_FILE = APP_SUPPORT / "port"
 
@@ -53,12 +59,17 @@ save_dir = Path.cwd()
 cookies_browser = None
 app_mode = False
 
+# Set by the Windows app (winapp/app.py):
+setup_status = None     # () -> {"ready": bool, ...}: the one-time download of yt-dlp, ffmpeg and deno
+setup_retry = None      # () -> None: try that download again
+process_started = None  # (Popen) -> None: ties each download to the app, so they stop if it's closed
+
 
 def load_settings() -> dict:
     # Falls back to the settings saved before the app was renamed (3.0), so the folder is kept.
     for settings in (SETTINGS_FILE, OLD_APP_SUPPORT / "settings.json"):
         try:
-            return json.loads(settings.read_text())
+            return json.loads(settings.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
     return {}
@@ -66,11 +77,37 @@ def load_settings() -> dict:
 
 def save_settings(settings: dict) -> None:
     APP_SUPPORT.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
+    SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
+def downloads_folder() -> Path:
+    """The user's Downloads folder (on Windows it can live anywhere, so ask Windows)."""
+    if ytdl.IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class GUID(ctypes.Structure):
+                _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+                            ("Data4", ctypes.c_ubyte * 8)]
+
+            downloads = GUID(0x374DE290, 0x123F, 0x4565, (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B))
+            found = ctypes.c_wchar_p()
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(downloads), 0, None, ctypes.byref(found)) == 0:
+                path = Path(found.value)
+                ctypes.windll.ole32.CoTaskMemFree(found)
+                if path.is_dir():
+                    return path
+        except (OSError, AttributeError, ValueError):
+            pass
+    path = Path.home() / "Downloads"
+    return path if path.is_dir() else Path.home()
 
 
 def display_folder() -> str:
     home, folder = str(Path.home()), str(save_dir)
+    if ytdl.IS_WINDOWS:
+        return folder  # Windows users don't know "~"
     return "~" + folder[len(home):] if folder.startswith(home) else folder
 
 
@@ -96,11 +133,44 @@ def clean_error(line: str) -> str:
 
 def stop(process) -> None:
     """Stop yt-dlp and the ffmpeg it started (each download runs in its own process group)."""
-    if process and process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            process.terminate()
+    if not process or process.poll() is not None:
+        return
+    if ytdl.IS_WINDOWS:
+        # /T stops the whole tree: yt-dlp and the ffmpeg it started.
+        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+        if process.poll() is None:
+            process.kill()
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        process.terminate()
+
+
+def stop_all() -> None:
+    with lock:
+        running = [job.get("_process") for job in jobs.values()]
+    for process in running:
+        stop(process)
+
+
+def process_options() -> dict:
+    """Each download gets its own process group, so Cancel can stop yt-dlp together with its ffmpeg."""
+    if ytdl.IS_WINDOWS:
+        # UTF-8 output, so titles in any language come through; no console window.
+        environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+        return {"env": environment,
+                "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
+def reveal(path: str) -> None:
+    """Show the file in Finder / File Explorer."""
+    if ytdl.IS_WINDOWS:
+        subprocess.Popen(f'explorer /select,"{path}"')
+    else:
+        subprocess.run(["open", "-R", path])
 
 
 def run_job(job: dict) -> None:
@@ -128,8 +198,10 @@ def run_job(job: dict) -> None:
     cmd = ytdl.yt_dlp_command(args, [job["url"]], str(filepath_log), extra, folder=folder)
 
     errors, problem, clip_length, target = [], None, None, None
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, bufsize=1, cwd=folder, start_new_session=True)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                               encoding="utf-8", errors="replace", bufsize=1, cwd=folder, **process_options())
+    if process_started:
+        process_started(process)
     update(job, _process=process)
     for line in process.stdout:
         line = line.rstrip()
@@ -270,7 +342,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self.guard():
             return
-        if self.path in ("/", "/index.html"):
+        route = urlparse(self.path).path  # the Windows app adds ?app=windows
+        if route in ("/", "/index.html"):
             body = PAGE.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -278,11 +351,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/state":
+        elif route == "/api/state":
             with lock:
                 listed = [public(job) for job in sorted(jobs.values(), key=lambda j: j["created"], reverse=True)]
             self.send_json({"folder": display_folder(), "folderPath": str(save_dir),
-                            "canChange": app_mode, "jobs": listed})
+                            "canChange": app_mode, "jobs": listed, "version": ytdl.VERSION,
+                            "platform": "windows" if ytdl.IS_WINDOWS else "mac",
+                            "setup": setup_status() if setup_status else None})
         else:
             self.send_error(404)
 
@@ -297,7 +372,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Bad request"}, 400)
             return
 
+        if self.path == "/api/setup":
+            if setup_retry:
+                setup_retry()
+            self.send_json({"ok": True})
+            return
+
         if self.path == "/api/download":
+            if setup_status and not setup_status().get("ready"):
+                self.send_json({"error": "Still getting ready. Try again when the download tools are installed."}, 409)
+                return
             urls = [u for u in str(data.get("urls", "")).split() if urlparse(u).scheme in ("http", "https")]
             if not urls:
                 self.send_json({"error": "That doesn't look like a link."}, 400)
@@ -342,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/reveal":
             for file in job["files"]:
                 if Path(file["path"]).exists():
-                    subprocess.run(["open", "-R", file["path"]])
+                    reveal(file["path"])
                     break
             self.send_json({"ok": True})
         elif self.path == "/api/remove":
@@ -371,27 +455,28 @@ def watch_parent(pid: int, server: ThreadingHTTPServer) -> None:
             pass
 
 
-def serve(folder: Path | None = None, cookies: str | None = None, app: bool = False,
-          watch_pid: int | None = None, open_browser: bool = True) -> None:
+def create_server(folder: Path | None = None, cookies: str | None = None, app: bool = False) -> ThreadingHTTPServer:
+    """Sets the folder and opens the port. Call serve_forever() on the result (serve() does)."""
     global cookies_browser, save_dir, app_mode
     cookies_browser = cookies
     app_mode = app
     if app:
-        saved = Path(load_settings().get("folder") or Path.home() / "Downloads")
-        save_dir = saved if saved.is_dir() else Path.home() / "Downloads"
+        saved = load_settings().get("folder")
+        save_dir = Path(saved) if saved and Path(saved).is_dir() else downloads_folder()
     else:
         save_dir = folder or Path.cwd()
 
-    server = None
     for port in range(FIRST_PORT, FIRST_PORT + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-            break
+            return ThreadingHTTPServer(("127.0.0.1", port), Handler)
         except OSError:
             continue
-    if not server:
-        ytdl.fail("No free port between 8765 and 8784.")
+    ytdl.fail("No free port between 8765 and 8784.")
 
+
+def serve(folder: Path | None = None, cookies: str | None = None, app: bool = False,
+          watch_pid: int | None = None, open_browser: bool = True) -> None:
+    server = create_server(folder, cookies, app)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"ytdl is open at {url}")
     print(f"Saving to: {save_dir}")
@@ -407,18 +492,16 @@ def serve(folder: Path | None = None, cookies: str | None = None, app: bool = Fa
     print(f"PORT {server.server_address[1]}")
     sys.stdout.flush()
 
-    if open_browser and subprocess.run(["open", "-a", "Google Chrome", url], capture_output=True).returncode != 0:
-        webbrowser.open(url)
+    if open_browser:
+        if sys.platform != "darwin" or subprocess.run(["open", "-a", "Google Chrome", url], capture_output=True).returncode != 0:
+            webbrowser.open(url)
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping…")
     finally:
-        with lock:
-            running = [job.get("_process") for job in jobs.values()]
-        for process in running:
-            stop(process)
+        stop_all()
         server.server_close()
         if app:
             PORT_FILE.unlink(missing_ok=True)

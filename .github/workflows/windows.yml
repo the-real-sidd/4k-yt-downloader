@@ -1,0 +1,83 @@
+# Builds and tests the Windows app on GitHub's Windows machines, on every push.
+# For a version tag (v3.1, pushed by scripts/release.sh) it then adds the Windows installer to
+# that release and publishes it. Until then the release is a draft, so Mac and Windows users
+# only get a new version once both are ready and the Windows tests have passed.
+name: Windows app
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install the build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r winapp/requirements.txt
+
+      - name: Build the app and the installer
+        run: python winapp/build.py
+
+      - name: Make sure Edge WebView2 is installed (it comes with Windows 10 and 11)
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
+          if (-not $version -or $version -eq '0.0.0.0') {
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\webview2.exe"
+            Start-Process "$env:RUNNER_TEMP\webview2.exe" -ArgumentList '/silent', '/install' -Wait
+            $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
+          }
+          "WebView2 $version"
+
+      - name: Test the download code
+        run: python winapp/tests/ci_test.py library
+
+      - name: Test the installed app
+        if: ${{ !cancelled() }}
+        run: python winapp/tests/ci_test.py app
+
+      - name: Save test results and screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-test-results
+          path: ci-output/
+
+      - name: Save the installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: dist/4K-YT-Downloader-Setup.exe
+
+      - name: Add the installer to the release and publish it
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          for attempt in $(seq 1 60); do
+            gh release view "$tag" >/dev/null 2>&1 && break
+            echo "Waiting for the $tag release (scripts/release.sh creates it)…"
+            sleep 10
+          done
+          gh release upload "$tag" dist/4K-YT-Downloader-Setup.exe --clobber
+          gh release edit "$tag" --draft=false --latest
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"

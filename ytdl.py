@@ -15,8 +15,10 @@ into the folder you run it from, or into a folder you name.
   ytdl --dry-run <link>         shows the quality it would pick and downloads nothing
   ytdl --web                    opens a simple page in Chrome to paste links into
   ytdl --web <folder>           same, saving into that folder
+  ytdl --version                shows the version
 
-Needs yt-dlp, ffmpeg and deno (brew install yt-dlp ffmpeg deno).
+Needs yt-dlp, ffmpeg and deno (brew install yt-dlp ffmpeg deno). The same code runs inside
+the Mac app and the Windows app (winapp/), which bring their own copies of these tools.
 """
 
 from __future__ import annotations
@@ -29,13 +31,48 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 OUTPUT_TEMPLATE = "%(title).150B.%(ext)s"
+IS_WINDOWS = os.name == "nt"
 
 # H.264 bitrates for --compat, by output height.
 COMPAT_BITRATES = [(2160, "45M"), (1440, "24M"), (1080, "12M"), (720, "7M"), (0, "4M")]
+
+# The Windows app has no console window. Without this, every ffmpeg/ffprobe it runs would
+# flash a black window, so the app sets it to True.
+hide_windows = False
+
+
+def _version() -> str:
+    """The app version, from the VERSION file shipped next to this file (repo, Mac app, Windows app)."""
+    try:
+        return (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+VERSION = _version()
+
+
+def no_window() -> dict:
+    """subprocess options that keep a console window from appearing (Windows app only)."""
+    return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS and hide_windows else {}
+
+
+def replace_file(source: Path, target: Path) -> None:
+    """os.replace, retried for a few seconds: on Windows a virus scanner or Explorer's preview
+    can hold a file that was just written."""
+    for attempt in range(20):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.5)
 
 
 def fail(message: str) -> None:
@@ -44,11 +81,12 @@ def fail(message: str) -> None:
 
 
 def check_tools() -> None:
+    install = "winget install yt-dlp.yt-dlp Gyan.FFmpeg DenoLand.Deno" if IS_WINDOWS else "brew install yt-dlp ffmpeg deno"
     missing = [tool for tool in ("yt-dlp", "ffmpeg", "ffprobe") if not shutil.which(tool)]
     if missing:
-        fail(f"Missing {', '.join(missing)}. Install with:  brew install yt-dlp ffmpeg")
+        fail(f"Missing {', '.join(missing)}. Install with:  {install}")
     if not shutil.which("deno"):
-        print("⚠ deno not found. YouTube may only offer low-quality formats. Fix:  brew install deno")
+        print(f"⚠ deno not found. YouTube may only offer low-quality formats. Fix:  {install}")
 
 
 def looks_like_link(text: str) -> bool:
@@ -122,7 +160,7 @@ def check_clip(start: float | None, end: float | None) -> None:
 
 
 def clip_name(start: float | None, end: float | None) -> str:
-    """Filename tag for a clip, e.g. '[1m30s-2m45s]' (macOS file names can't hold ':')."""
+    """Filename tag for a clip, e.g. '[1m30s-2m45s]' (Mac and Windows file names can't hold ':')."""
     def tag(seconds: float) -> str:
         hours, minutes, secs, fraction = _split_time(seconds)
         return (f"{hours}h{minutes:02d}m" if hours else f"{minutes}m") + f"{secs:02d}{fraction}s"
@@ -155,7 +193,8 @@ def yt_dlp_command(args, links: list[str], filepath_log: str, extra: list[str] =
     ]
 
     if args.audio:
-        cmd += ["-f", "ba[ext=m4a]/ba", "-x", "--audio-format", "m4a", "--audio-quality", "0"]
+        # /b: some sites only offer one file with sound and picture; the sound is taken from it.
+        cmd += ["-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a", "--audio-quality", "0"]
     else:
         cap = args.max
         # With --compat, prefer YouTube's own H.264 (it has it up to 1080p), so there is
@@ -193,7 +232,7 @@ def yt_dlp_command(args, links: list[str], filepath_log: str, extra: list[str] =
 def read_saved(filepath_log: Path, folder: Path) -> list[tuple[Path, float | None]]:
     """Files yt-dlp saved, with the full video's duration, from its --print-to-file log."""
     saved = []
-    for line in Path(filepath_log).read_text().splitlines():
+    for line in Path(filepath_log).read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             item = json.loads(line)
         except json.JSONDecodeError:
@@ -214,7 +253,7 @@ def probe(path: Path) -> dict:
         ["ffprobe", "-v", "error", "-show_entries",
          "stream=codec_type,codec_name,width,height,start_time:format=duration",
          "-show_chapters", "-of", "json", str(path)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", **no_window(),
     )
     return json.loads(result.stdout or "{}")
 
@@ -259,11 +298,45 @@ def finalize_clip(path: Path, length: float | None) -> Path:
            "-map", "0:v:0?", "-map", "0:a:0?", "-map_chapters", "-1", "-c", "copy",
            *(["-t", f"{length:.3f}"] if too_long else []),
            "-movflags", "+faststart", str(temp)]
-    if subprocess.run(cmd).returncode != 0 or not temp.exists():
+    if subprocess.run(cmd, **no_window()).returncode != 0 or not temp.exists():
         temp.unlink(missing_ok=True)
         return path
-    os.replace(temp, path)
+    replace_file(temp, path)
     return path
+
+
+# H.264 encoders for --compat, best first, with the pixel format each one takes.
+# The Mac always has Apple's hardware encoder. A Windows PC may have an NVIDIA (nvenc),
+# Intel (qsv) or AMD (amf) one; the CPU encoder (libx264) is slower but works everywhere.
+MAC_ENCODER = ["-c:v", "h264_videotoolbox", "-pix_fmt", "yuv420p"]
+PC_ENCODERS = [
+    ["-c:v", "h264_nvenc", "-preset", "p5", "-pix_fmt", "yuv420p"],
+    ["-c:v", "h264_qsv", "-preset", "medium", "-pix_fmt", "nv12"],
+    ["-c:v", "h264_amf", "-quality", "balanced", "-pix_fmt", "nv12"],
+]
+CPU_ENCODER = ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
+_encoder: list[str] | None = None
+
+
+def h264_encoder() -> list[str]:
+    """The encoder settings to use, found once by encoding a tiny test clip with each candidate."""
+    global _encoder
+    if _encoder is None:
+        if sys.platform == "darwin":
+            _encoder = MAC_ENCODER
+        else:
+            _encoder = CPU_ENCODER
+            for candidate in PC_ENCODERS:
+                test = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                        "-i", "color=c=black:s=1280x720:r=30:d=0.5", *candidate, "-b:v", "4M", "-f", "null", "-"]
+                try:
+                    works = subprocess.run(test, capture_output=True, timeout=30, **no_window()).returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    works = False
+                if works:
+                    _encoder = candidate
+                    break
+    return _encoder
 
 
 def convert_to_h264(path: Path, on_progress=None, force: bool = False) -> Path:
@@ -283,8 +356,9 @@ def convert_to_h264(path: Path, on_progress=None, force: bool = False) -> Path:
     height = video.get("height") or 1080
     bitrate = next(rate for min_height, rate in COMPAT_BITRATES if height >= min_height)
     temp = path.with_name(path.stem + ".h264-tmp.mp4")
+    encoder = h264_encoder()
     if not on_progress:
-        print(f"→ Converting to H.264 ({bitrate}bps, hardware encoder). Long videos take a while…")
+        print(f"→ Converting to H.264 ({bitrate}bps, {encoder[1]}). Long videos take a while…")
 
     copy_audio = audio and audio.get("codec_name") == "aac" and not force
     audio_args = ["-c:a", "copy"] if copy_audio else ["-c:a", "aac", "-b:a", "192k"]
@@ -293,7 +367,7 @@ def convert_to_h264(path: Path, on_progress=None, force: bool = False) -> Path:
         *(["-nostats", "-progress", "pipe:1"] if on_progress else ["-stats"]),
         "-i", str(path),
         "-map", "0:v:0", "-map", "0:a:0?",
-        "-c:v", "h264_videotoolbox", "-b:v", bitrate, "-pix_fmt", "yuv420p", "-tag:v", "avc1",
+        *encoder, "-b:v", bitrate, "-tag:v", "avc1",
         *audio_args,
         "-movflags", "+faststart",
         str(temp),
@@ -301,23 +375,27 @@ def convert_to_h264(path: Path, on_progress=None, force: bool = False) -> Path:
 
     if on_progress:
         duration = float(info.get("format", {}).get("duration") or 0)
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                                   **no_window())
         for line in process.stdout:
             if line.startswith("out_time_us=") and duration > 0 and line[12:].strip().isdigit():
                 if on_progress(min(int(line[12:]) / 1e6 / duration, 1.0)) is False:
                     process.terminate()
         returncode = process.wait()
     else:
-        returncode = subprocess.run(cmd).returncode
+        returncode = subprocess.run(cmd, **no_window()).returncode
 
     if returncode != 0:
         temp.unlink(missing_ok=True)
         raise ConversionError(f"H.264 conversion failed. The original is still at: {path.name}")
 
     final = path.with_suffix(".mp4")
-    os.replace(temp, final)
+    replace_file(temp, final)
     if final != path:
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            pass  # Windows: something still has the original open; the converted file is saved anyway
     return final
 
 
@@ -342,6 +420,7 @@ def main() -> None:
                         help="use your sign-in from this browser (chrome, safari, firefox, brave, edge)")
     parser.add_argument("--dry-run", action="store_true", help="show what would be downloaded, download nothing")
     parser.add_argument("--web", action="store_true", help="open a simple page in Chrome to paste links into")
+    parser.add_argument("--version", action="version", version=f"4K YT Downloader {VERSION}")
     # Intermixed, so  ytdl <folder> --audio <link>  works as well as options first.
     args = parser.parse_intermixed_args()
     try:
@@ -398,7 +477,7 @@ def main() -> None:
                 print(f"   {path.name}\n   {describe(path)}")
 
     if result.returncode != 0:
-        fail("Some downloads failed. Try:  brew upgrade yt-dlp   or add  --cookies chrome")
+        fail(f"Some downloads failed. Try:  {'yt-dlp -U' if IS_WINDOWS else 'brew upgrade yt-dlp'}   or add  --cookies chrome")
 
 
 if __name__ == "__main__":

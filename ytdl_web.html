@@ -38,18 +38,48 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 760px; margin: 0 auto; padding: 56px 16px 96px; }
 
   .credit {
     position: fixed; left: 0; right: 0; bottom: 0;
-    padding: 10px 16px 12px; text-align: center;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 10px 18px 12px;
     font-size: 12px; color: var(--muted); background: var(--bg);
     border-top: 1px solid var(--line);
     -webkit-user-select: none; user-select: none;
   }
+  .credit a { color: inherit; text-decoration: none; }
+  .credit a b { font-weight: 600; color: var(--text); }
+  .credit a:hover b { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .credit a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .version { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* Windows app, first launch: downloading yt-dlp, ffmpeg and deno. */
+  .setup { margin-bottom: 14px; }
+  .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .setup-title { font-weight: 600; }
+  .setup-detail { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .setup.failed .setup-detail { color: var(--accent); }
+  .setup .track { margin: 12px 0 2px; }
+  .setup.failed .track { display: none; }
+
+  /* Windows app: asked before closing while downloads run (the Mac app uses a native sheet). */
+  .modal {
+    position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px;
+    background: rgba(0,0,0,.35);
+  }
+  .sheet {
+    width: min(420px, 100%); background: var(--card); color: var(--text);
+    border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  }
+  .sheet h3 { margin: 0 0 6px; font-size: 16px; font-weight: 650; }
+  .sheet p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+  .sheet .row { display: flex; justify-content: flex-end; gap: 8px; }
+  .sheet .primary { height: 36px; padding: 0 16px; font-size: 14px; border-radius: 9px; }
+  .sheet .ghost { height: 36px; }
 
   header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
   .logo {
@@ -154,7 +184,8 @@
   .ghost:hover { background: var(--track); }
 
   /* Inside the Mac app the window's title bar sits over the top of the page. */
-  body.native .wrap { padding-top: 46px; }
+  body.mac-app .wrap { padding-top: 46px; }
+  body.win-app .wrap { padding-top: 36px; }
   body.native { user-select: none; -webkit-user-select: none; }
   body.native input, body.native .title, body.native .status { user-select: text; -webkit-user-select: text; }
 
@@ -180,6 +211,17 @@
       <p class="folder">Saving to <b id="folder">…</b><button class="link" id="change" type="button" hidden>Change</button></p>
     </div>
   </header>
+
+  <section id="setup" class="setup panel" hidden aria-live="polite">
+    <div class="setup-row">
+      <div>
+        <div class="setup-title" id="setup-title">Getting ready…</div>
+        <div class="setup-detail" id="setup-detail"></div>
+      </div>
+      <button id="setup-retry" class="ghost" type="button" hidden>Try again</button>
+    </div>
+    <div class="track"><div class="fill" id="setup-fill"></div></div>
+  </section>
 
   <form id="form" class="panel" autocomplete="off">
     <div class="bar">
@@ -222,7 +264,21 @@
   <section id="list" class="list" aria-live="polite"></section>
   <p id="empty" class="empty">Your downloads will show up here.</p>
 </main>
-<footer class="credit">Built with ❤️ by the.real.sidd</footer>
+<footer class="credit">
+  <a id="credit" href="https://www.instagram.com/the.real.sidd/" target="_blank" rel="noopener" title="the.real.sidd on Instagram">Built with ❤️ by <b>the.real.sidd</b></a>
+  <span id="version" class="version"></span>
+</footer>
+
+<div id="quit" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="quit-title">
+  <div class="sheet">
+    <h3 id="quit-title">A download is still running</h3>
+    <p>Closing the app stops it. Download the same link again later to pick up where it stopped.</p>
+    <div class="row">
+      <button id="quit-keep" class="ghost" type="button">Keep Downloading</button>
+      <button id="quit-yes" class="primary" type="button">Close</button>
+    </div>
+  </div>
+</div>
 
 <script>
   const $ = (id) => document.getElementById(id);
@@ -231,13 +287,26 @@
   const clipOn = $("clip-on"), fromInput = $("from"), toInput = $("to"), clipInfo = $("clip-info");
   const list = $("list"), cards = new Map();
   const ACTIVE = new Set(["starting", "downloading", "finishing", "converting"]);
-  // True inside 4K YT Downloader.app, which shows this page in its own window.
-  const nativeApp = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ytdl);
+  // The Mac app (YTDownloader.swift) and the Windows app (winapp/app.py) show this page in
+  // their own window. The Mac app talks to it through webkit.messageHandlers; the Windows app
+  // loads it with ?app=windows and adds window.pywebview.api once the page has loaded.
+  const macApp = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ytdl);
+  const winApp = new URLSearchParams(location.search).get("app") === "windows";
+  const nativeApp = macApp || winApp;
+  let onWindows = winApp || /Windows/.test(navigator.userAgent);
+  const winApi = winApp ? new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api) resolve(window.pywebview.api);
+    else window.addEventListener("pywebviewready", () => resolve(window.pywebview.api), { once: true });
+  }) : null;
   const offlineText = nativeApp
-    ? "The downloader stopped. Quit 4K YT Downloader and open it again."
+    ? "The downloader stopped. Close 4K YT Downloader and open it again."
     : "The downloader isn't running. Start it with  ytdl --web  in Terminal, then reload this page.";
   let folderPath = "";
+  let settingUp = false;
   if (nativeApp) document.body.classList.add("native");
+  if (macApp) document.body.classList.add("mac-app");
+  if (winApp) document.body.classList.add("win-app");
+  const pasteKey = () => onWindows ? "Ctrl+V" : "⌘V";
 
   function say(text, kind = "error") {
     msg.textContent = text;
@@ -283,7 +352,10 @@
   const clipboardWaiting = new Map();
   let clipboardRequests = 0;
   function readClipboard(auto) {
-    if (nativeApp) {
+    if (winApp) {
+      return winApi.then((api) => api.read_clipboard(auto)).then((text) => ({ text }), () => ({ text: null }));
+    }
+    if (macApp) {
       return new Promise((resolve) => {
         const id = ++clipboardRequests;
         clipboardWaiting.set(id, resolve);
@@ -317,7 +389,7 @@
   urlInput.addEventListener("input", () => { if (msg.dataset.kind === "info") say(""); });
   // The app calls this when it comes to the front; a browser tab gets focus events.
   window.ytdlAppActivated = checkClipboard;
-  if (!nativeApp) {
+  if (!macApp) {
     window.addEventListener("focus", checkClipboard);
     document.addEventListener("visibilitychange", checkClipboard);
   }
@@ -332,9 +404,9 @@
         urlInput.value = filledIn = lastClipboard = link;
         say(isYouTube(link) || /^https?:\/\//i.test(link) ? "" : "That doesn't look like a link. Copy the video's link from YouTube.");
       } else if (denied) {
-        say(nativeApp
+        say(macApp
           ? "macOS didn't let 4K YT Downloader read the clipboard. Press ⌘V instead, or allow it in System Settings › Privacy & Security › Paste from Other Apps."
-          : "This browser didn't allow reading the clipboard. Press ⌘V instead, or allow clipboard access for this page.");
+          : `This browser didn't allow reading the clipboard. Press ${pasteKey()} instead, or allow clipboard access for this page.`);
       } else {
         say("Nothing to paste. Copy a YouTube link first.");
       }
@@ -443,11 +515,16 @@
   });
 
   // "Change" asks the app for its folder panel; the app calls ytdlFolderChosen(path or null).
-  $("change").addEventListener("click", () => {
+  $("change").addEventListener("click", async () => {
     if (!nativeApp) return;
     $("change").disabled = true;
     $("change").textContent = "Choosing…";
-    window.webkit.messageHandlers.ytdl.postMessage({ action: "chooseFolder", current: folderPath });
+    if (winApp) {
+      const api = await winApi;
+      window.ytdlFolderChosen(await api.choose_folder(folderPath).catch(() => null));
+    } else {
+      window.webkit.messageHandlers.ytdl.postMessage({ action: "chooseFolder", current: folderPath });
+    }
   });
   window.ytdlFolderChosen = async (path) => {
     try {
@@ -551,7 +628,7 @@
       if (ACTIVE.has(job.status)) {
         p.actions.append(button("Cancel", () => post("/api/cancel", { id: job.id }).then(refresh).catch(() => {})));
       } else if (job.status === "done") {
-        p.actions.append(button("Show in Finder", () => post("/api/reveal", { id: job.id }).catch(() => {})));
+        p.actions.append(button(onWindows ? "Show in folder" : "Show in Finder", () => post("/api/reveal", { id: job.id }).catch(() => {})));
       } else {
         p.actions.append(button("Retry", async () => {
           await post("/api/download", { urls: job.url, quality: job.quality, compat: job.compat, start: job.start, end: job.end }).catch(() => {});
@@ -570,6 +647,10 @@
     try {
       const res = await fetch("/api/state", { cache: "no-store" });
       const state = await res.json();
+      onWindows = state.platform === "windows" || onWindows;
+      $("version").textContent = state.version ? `Version ${state.version}` : "";
+      showSetup(state.setup);
+      if (settingUp) active = true;
       $("folder").textContent = state.folder;
       folderPath = state.folderPath;
       $("change").hidden = !(state.canChange && nativeApp);
@@ -592,6 +673,44 @@
       msg.dataset.offline = "1";
     }
     timer = setTimeout(refresh, active ? 700 : 2500);
+  }
+
+  // ---- Windows app: the one-time download of the tools it uses ----
+
+  function showSetup(setup) {
+    settingUp = !!(setup && !setup.ready);
+    $("setup").hidden = !settingUp;
+    go.disabled = settingUp;
+    if (!settingUp) return;
+    const failed = !!setup.error;
+    $("setup").classList.toggle("failed", failed);
+    $("setup-title").textContent = failed ? "Couldn't finish getting ready" : "Getting ready (only the first time)";
+    $("setup-detail").textContent = failed ? setup.error : setup.message || "";
+    $("setup-retry").hidden = !failed;
+    const track = $("setup").querySelector(".track");
+    track.classList.toggle("busy", setup.progress == null);
+    $("setup-fill").style.width = Math.round((setup.progress || 0) * 100) + "%";
+  }
+  $("setup-retry").addEventListener("click", () => post("/api/setup", {}).then(refresh).catch(() => {}));
+
+  // ---- Windows app: closing while downloads run (the app calls this instead of closing) ----
+
+  window.ytdlConfirmQuit = (running) => {
+    $("quit-title").textContent = running === 1 ? "A download is still running" : `${running} downloads are still running`;
+    $("quit").hidden = false;
+    $("quit-keep").focus();
+  };
+  $("quit-keep").addEventListener("click", () => { $("quit").hidden = true; urlInput.focus(); });
+  $("quit-yes").addEventListener("click", async () => (await winApi).quit());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("quit").hidden) $("quit-keep").click();
+  });
+
+  if (winApp) {
+    // Right-click works in the text fields (Cut, Copy, Paste) but not on the rest of the page.
+    document.addEventListener("contextmenu", (event) => {
+      if (!event.target.closest("input")) event.preventDefault();
+    });
   }
 
   loadPrefs();

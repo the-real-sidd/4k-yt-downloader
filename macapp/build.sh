@@ -25,7 +25,7 @@ swiftc -swift-version 5 -O -target x86_64-apple-macos14 -o "$BUILD/x86_64" "$HER
 lipo -create -output "$APP/Contents/MacOS/$NAME" "$BUILD/arm64" "$BUILD/x86_64"
 
 echo "→ Adding the downloader and icon"
-cp "$TOOLS/ytdl.py" "$TOOLS/ytdl_web.py" "$TOOLS/ytdl_web.html" "$APP/Contents/Resources/ytdl/"
+cp "$TOOLS/ytdl.py" "$TOOLS/ytdl_web.py" "$TOOLS/ytdl_web.html" "$TOOLS/VERSION" "$APP/Contents/Resources/ytdl/"
 cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
