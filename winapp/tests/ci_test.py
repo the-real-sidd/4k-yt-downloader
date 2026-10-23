@@ -307,6 +307,8 @@ def library() -> None:
         detail["file"] = file.name
         detail["duration"] = probe(file).get("format", {}).get("duration")
     info("real YouTube clip (not required to pass)", detail)
+    if job.get("error"):
+        check("yt-dlp's messages keep their characters (UTF-8)", "\ufffd" not in job["error"], job["error"][:80])
 
     ytdl_web.stop_all()
     server.shutdown()

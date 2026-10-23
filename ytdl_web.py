@@ -188,6 +188,8 @@ def run_job(job: dict) -> None:
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as log:
         filepath_log = Path(log.name)
     extra = [
+        # UTF-8 messages whatever the system's language (Windows would use its old code page).
+        "--encoding", "utf-8",
         "--newline", "--progress", "--progress-delta", "0.5",
         "--progress-template", PROGRESS_TEMPLATE,
         "--print", "before_dl:META %(.{title,thumbnail,resolution,fps,duration,section_start,section_end,_filename})j",
@@ -252,6 +254,11 @@ def run_job(job: dict) -> None:
         update(job, status="finishing", progress=None)
         saved = [(ytdl.finalize_clip(path, ytdl.clip_length(args.start, args.end, duration)), duration)
                  for path, duration in saved]
+        if saved and all(path.exists() and ytdl.is_empty(path, ytdl.clip_length(args.start, args.end, None))
+                         for path, _ in saved):
+            for path, _ in saved:
+                path.unlink(missing_ok=True)
+            problem = "The clip starts after the video ends."
     saved = [path for path, _ in saved]
 
     if job.get("_cancelled"):

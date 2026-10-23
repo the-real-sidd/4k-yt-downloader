@@ -258,6 +258,16 @@ def probe(path: Path) -> dict:
     return json.loads(result.stdout or "{}")
 
 
+def is_empty(path: Path, expected: float | None = None) -> bool:
+    """True for a clip with (almost) nothing in it, e.g. one that starts after the video ends:
+    yt-dlp can't catch that when it doesn't know a video's length, as with some non-YouTube
+    links, and ffmpeg then leaves a few stray frames (about 0.1 s)."""
+    info = probe(path)
+    duration = float(info.get("format", {}).get("duration") or 0)
+    limit = min(0.25, expected / 2) if expected else 0.25
+    return duration < limit or not any(st.get("codec_type") in ("video", "audio") for st in info.get("streams", []))
+
+
 def describe(path: Path) -> str:
     info = probe(path)
     parts = []
@@ -456,6 +466,11 @@ def main() -> None:
         result = subprocess.run(yt_dlp_command(args, links, filepath_log, folder=folder))
         saved = [finalize_clip(path, clip_length(args.start, args.end, duration)) if is_clip(args) else path
                  for path, duration in read_saved(Path(filepath_log), folder)]
+        if is_clip(args) and saved and all(path.exists() and is_empty(path, clip_length(args.start, args.end, None))
+                                           for path in saved):
+            for path in saved:
+                path.unlink(missing_ok=True)
+            fail("The clip starts after the video ends.")
     except KeyboardInterrupt:
         fail("Cancelled. Run the same command again to resume.")
     finally:

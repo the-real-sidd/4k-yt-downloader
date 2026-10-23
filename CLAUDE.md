@@ -188,7 +188,7 @@ and "Version X" (right, from `/api/state` → `ytdl.VERSION`, read from the VERS
 ## Open ideas / known gaps
 
 - In-app update check (e.g. a "New version available" banner comparing `CFBundleShortVersionString` with the latest GitHub release) that runs the install command.
-- For non-YouTube links whose length yt-dlp doesn't know, a start time past the end isn't reported as an error.
+- For links whose length yt-dlp doesn't know, a clip starting past the end is only caught after downloading (the empty file is removed and an error shown).
 - No licence file yet, so the code is "all rights reserved" by default. Ask Siddhant if he wants MIT or similar.
 - Notarization would remove the DMG Gatekeeper step but costs $99/yr. A Windows code-signing certificate
   (~$100–300/yr) would remove the SmartScreen warning for the downloaded installer.
