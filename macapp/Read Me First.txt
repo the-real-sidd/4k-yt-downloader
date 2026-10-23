@@ -1,0 +1,92 @@
+4K YT DOWNLOADER: READ ME FIRST
+===============================
+
+4K YT Downloader saves YouTube videos (up to 4K, with sound), just the audio,
+or only part of a video, to a folder on your Mac.
+
+It runs on Apple Silicon Macs (M1, M2, M3, M4...) with macOS 12 or newer, and
+on Intel Macs with macOS 14 or newer.
+
+
+EASIEST: INSTALL WITH ONE COMMAND (recommended)
+-----------------------------------------------
+
+Open Terminal (press Cmd+Space, type Terminal, press Return), paste this line
+and press Return:
+
+  curl -fsSL https://raw.githubusercontent.com/the-real-sidd/4k-yt-downloader/main/install.sh | bash
+
+It installs everything the app needs (Homebrew, yt-dlp, ffmpeg, deno, Python),
+installs the app in Applications and opens it. The first time it asks for your
+Mac password and can take a few minutes.
+
+To update later, run the same command again. It closes the app, replaces it
+with the newest version and keeps your settings. Nothing to uninstall.
+
+Installed this way, macOS doesn't block the app the first time you open it.
+
+
+OR: INSTALL FROM THIS DISK IMAGE
+--------------------------------
+
+1. Install Homebrew (a free tool installer), if `brew --version` doesn't
+   already work in Terminal:
+
+     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+   It asks for your Mac password. On Apple Silicon Macs, run the two
+   "Next steps" commands it shows at the end.
+
+2. Install the tools the app uses:
+
+     brew install yt-dlp ffmpeg deno python
+
+3. Drag "4K YT Downloader" onto the "Applications" folder in this window.
+   (If you have the older "YT Downloader" app, you can delete it.)
+
+4. Open it. macOS blocks it the first time because it isn't notarized by Apple:
+   - macOS 15 or newer: click "Done", open System Settings > Privacy & Security,
+     scroll down to "4K YT Downloader was blocked", click "Open Anyway".
+   - Older macOS: right-click the app > Open > Open.
+   Or run this once in Terminal instead:
+     xattr -dr com.apple.quarantine "/Applications/4K YT Downloader.app"
+
+
+USING IT
+--------
+
+- Copy a link on YouTube, then switch to 4K YT Downloader: the link is filled
+  in for you. Or click "Paste", or press Cmd+V. Then press Return.
+- The first time, macOS may ask whether the app can paste from your browser.
+  Click "Allow Paste". To stop it asking every time, open System Settings >
+  Privacy & Security > Paste from Other Apps and set 4K YT Downloader to Allow,
+  then quit and reopen the app.
+- Choose the quality: 4K, 1440p, 1080p, 720p, or Audio only.
+- "Works in every app (H.264)" is on by default, so files open in QuickTime,
+  Premiere, Final Cut, iMovie, CapCut, Windows and phones. Up to 1080p this
+  costs nothing extra. 1440p and 4K are converted after downloading, which
+  takes longer. Untick it to keep YouTube's original file.
+- Just a part of a long video: tick "Download only part of the video" and
+  type the times, like From 1:30 To 2:45 (or 1:02:45 for hours). Leave "To"
+  empty to go to the end. Only that part is downloaded, the file is exactly
+  that long, and its name ends with the times, e.g. "Title [1m30s-2m45s].mp4".
+- Click "Change" next to the folder name to pick where files are saved.
+- If you saved to Downloads, Documents or Desktop, macOS asks once for
+  permission. Click "Allow".
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+
+- Downloads suddenly stop working: YouTube changes often. Run the install
+  command above again; it also updates yt-dlp.
+- "A few free tools are missing": click "Copy Command", paste it into
+  Terminal, press Return, then open the app again (or just run the install
+  command above).
+- Anything else: the details are in this file:
+     ~/Library/Logs/4K YT Downloader.log
+
+
+Only download videos you have the right to use.
+
+Built with love by the.real.sidd

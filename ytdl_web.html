@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4K YT Downloader</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23E53F3C'/><path d='M16 8v12m-5-5 5 5 5-5M10 24h12' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #F5F4F1;
+    --card: #FFFFFF;
+    --text: #1A1A19;
+    --muted: #6E6C67;
+    --line: #E3E1DB;
+    --field: #FFFFFF;
+    --track: #ECEAE5;
+    --accent: #E53F3C;
+    --accent-press: #C93431;
+    --good: #2F8F5B;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212;
+      --card: #1C1C1B;
+      --text: #F2F1EE;
+      --muted: #A09E98;
+      --line: #2E2E2C;
+      --field: #161616;
+      --track: #2A2A28;
+      --good: #4CC384;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 16px 96px; }
+
+  .credit {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px 16px 12px; text-align: center;
+    font-size: 12px; color: var(--muted); background: var(--bg);
+    border-top: 1px solid var(--line);
+    -webkit-user-select: none; user-select: none;
+  }
+
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 12px; background: var(--accent);
+    display: grid; place-items: center; flex: none;
+  }
+  h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+  .folder { margin: 2px 0 0; color: var(--muted); font-size: 13px; word-break: break-all; }
+  .folder b { color: var(--text); font-weight: 550; }
+  .folder .link { font-size: 13px; color: var(--accent); margin-left: 6px; }
+  .folder .link:hover { color: var(--accent-press); text-decoration: underline; }
+  .folder .link:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); }
+  .bar { display: flex; gap: 10px; }
+  #url {
+    flex: 1; min-width: 0; height: 50px; padding: 0 16px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--field); color: var(--text);
+    font: inherit; font-size: 16px; outline: none;
+  }
+  #url:focus, .time input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  #url::placeholder, .time input::placeholder { color: var(--muted); }
+  .primary {
+    height: 50px; padding: 0 22px; border: 0; border-radius: 12px;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
+  }
+  .primary:hover { background: var(--accent-press); }
+  .primary:disabled { opacity: .55; cursor: default; }
+  .secondary {
+    height: 50px; padding: 0 16px; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--field); color: var(--text); font: inherit; font-weight: 600; font-size: 15px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
+  }
+  .secondary:hover { background: var(--track); }
+  .secondary:disabled { opacity: .55; cursor: default; }
+  .secondary svg { flex: none; }
+
+  .options { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+  .seg { display: inline-flex; flex-wrap: wrap; background: var(--track); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg label { position: relative; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg span {
+    display: block; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 550;
+    color: var(--muted); cursor: pointer; user-select: none;
+  }
+  .seg input:checked + span { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+  .check input:checked + span { color: var(--text); }
+  .check.off { opacity: .45; cursor: default; }
+
+  .clip {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); min-height: 49px;
+  }
+  .times { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .time { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .time input {
+    width: 96px; height: 34px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--text);
+    font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; outline: none;
+  }
+  .time input.bad { border-color: var(--accent); }
+  .clip-info { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .clip-info.bad { color: var(--accent); }
+
+  .msg { min-height: 20px; margin: 10px 2px 0; font-size: 13px; color: var(--accent); }
+  .msg[data-kind=info] { color: var(--good); }
+  .msg:empty { display: none; }
+
+  .list-head { display: flex; justify-content: space-between; align-items: baseline; margin: 30px 2px 10px; }
+  .list-head h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0; }
+  .link { background: none; border: 0; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; padding: 0; }
+  .link:hover { color: var(--text); }
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 28px 0; margin: 0; }
+
+  .job { display: flex; gap: 14px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  .thumb { width: 128px; aspect-ratio: 16/9; border-radius: 8px; background: var(--track) center/cover no-repeat; flex: none; }
+  .body { flex: 1; min-width: 0; }
+  .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { color: var(--muted); font-size: 12.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track { height: 6px; background: var(--track); border-radius: 99px; overflow: hidden; margin: 9px 0 6px; }
+  .fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+  .track.busy .fill {
+    width: 35% !important; transition: none;
+    animation: slide 1.1s ease-in-out infinite;
+  }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+  .job.done .fill { background: var(--good); }
+  .job.done .track, .job.error .track, .job.cancelled .track { display: none; }
+  .status { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .job.done .status { color: var(--good); margin-top: 6px; }
+  .job.error .status { color: var(--accent); white-space: normal; margin-top: 6px; }
+  .job.cancelled .status { margin-top: 6px; }
+  .actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+  .ghost {
+    height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; white-space: nowrap;
+  }
+  .ghost:hover { background: var(--track); }
+
+  /* Inside the Mac app the window's title bar sits over the top of the page. */
+  body.native .wrap { padding-top: 46px; }
+  body.native { user-select: none; -webkit-user-select: none; }
+  body.native input, body.native .title, body.native .status { user-select: text; -webkit-user-select: text; }
+
+  @media (max-width: 560px) {
+    .wrap { padding-top: 32px; }
+    .bar { flex-wrap: wrap; }
+    #url { flex: 1 1 100%; }
+    .bar .primary, .bar .secondary { flex: 1; }
+    .thumb { width: 88px; }
+    .job { flex-wrap: wrap; }
+    .actions { flex-direction: row; width: 100%; justify-content: flex-end; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>
+    </div>
+    <div>
+      <h1>4K YT Downloader</h1>
+      <p class="folder">Saving to <b id="folder">…</b><button class="link" id="change" type="button" hidden>Change</button></p>
+    </div>
+  </header>
+
+  <form id="form" class="panel" autocomplete="off">
+    <div class="bar">
+      <input id="url" type="text" placeholder="Paste a YouTube link and press Enter" spellcheck="false" autofocus aria-label="YouTube link">
+      <button id="paste" class="secondary" type="button" title="Paste the link you copied">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1.2"/><path d="M16 5h1.5A2.5 2.5 0 0 1 20 7.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5v-11A2.5 2.5 0 0 1 6.5 5H8"/></svg>
+        Paste
+      </button>
+      <button id="go" class="primary" type="submit">Download</button>
+    </div>
+    <div class="options">
+      <div class="seg" role="radiogroup" aria-label="Quality">
+        <label title="Best available, up to 4K"><input type="radio" name="quality" value="2160" checked><span>4K</span></label>
+        <label><input type="radio" name="quality" value="1440"><span>1440p</span></label>
+        <label><input type="radio" name="quality" value="1080"><span>1080p</span></label>
+        <label><input type="radio" name="quality" value="720"><span>720p</span></label>
+        <label><input type="radio" name="quality" value="audio"><span>Audio only</span></label>
+      </div>
+      <label class="check" id="compat-wrap" title="Saves an H.264 MP4 that opens in QuickTime, Premiere, Final Cut, iMovie, CapCut, Windows and phones. Up to 1080p YouTube's own H.264 is used; 1440p and 4K are converted after downloading, which takes longer.">
+        <input type="checkbox" id="compat" checked><span>Works in every app (H.264)</span>
+      </label>
+    </div>
+    <div class="clip">
+      <label class="check" title="Downloads only the part between the two times, not the whole video.">
+        <input type="checkbox" id="clip-on"><span>Download only part of the video</span>
+      </label>
+      <div class="times" id="times" hidden>
+        <label class="time">From <input id="from" type="text" placeholder="0:00" spellcheck="false" inputmode="numeric" aria-label="Start time"></label>
+        <label class="time">To <input id="to" type="text" placeholder="end" spellcheck="false" inputmode="numeric" aria-label="End time"></label>
+        <span class="clip-info" id="clip-info" aria-live="polite"></span>
+      </div>
+    </div>
+    <p id="msg" class="msg" role="status"></p>
+  </form>
+
+  <div class="list-head" id="list-head" hidden>
+    <h2>Downloads</h2>
+    <button class="link" id="clear" type="button">Clear finished</button>
+  </div>
+  <section id="list" class="list" aria-live="polite"></section>
+  <p id="empty" class="empty">Your downloads will show up here.</p>
+</main>
+<footer class="credit">Built with ❤️ by the.real.sidd</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const form = $("form"), urlInput = $("url"), go = $("go"), msg = $("msg");
+  const compat = $("compat"), compatWrap = $("compat-wrap");
+  const clipOn = $("clip-on"), fromInput = $("from"), toInput = $("to"), clipInfo = $("clip-info");
+  const list = $("list"), cards = new Map();
+  const ACTIVE = new Set(["starting", "downloading", "finishing", "converting"]);
+  // True inside 4K YT Downloader.app, which shows this page in its own window.
+  const nativeApp = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ytdl);
+  const offlineText = nativeApp
+    ? "The downloader stopped. Quit 4K YT Downloader and open it again."
+    : "The downloader isn't running. Start it with  ytdl --web  in Terminal, then reload this page.";
+  let folderPath = "";
+  if (nativeApp) document.body.classList.add("native");
+
+  function say(text, kind = "error") {
+    msg.textContent = text;
+    msg.dataset.kind = kind;
+    delete msg.dataset.offline;
+  }
+
+  // Remember the last chosen options in this browser. (v2: H.264 is now on unless turned off.)
+  function loadPrefs() {
+    try {
+      const prefs = JSON.parse(localStorage.getItem("ytdl-prefs-v2") || localStorage.getItem("ytdl-prefs") || "{}");
+      const radio = form.querySelector(`input[name=quality][value="${prefs.quality}"]`);
+      if (radio) radio.checked = true;
+      compat.checked = localStorage.getItem("ytdl-prefs-v2") ? prefs.compat !== false : true;
+    } catch {}
+    syncCompat();
+  }
+  function savePrefs() {
+    try { localStorage.setItem("ytdl-prefs-v2", JSON.stringify({ quality: quality(), compat: compat.checked })); } catch {}
+  }
+  const quality = () => form.querySelector("input[name=quality]:checked").value;
+  function syncCompat() {
+    const audio = quality() === "audio";
+    compat.disabled = audio;
+    compatWrap.classList.toggle("off", audio);
+  }
+  form.addEventListener("change", (event) => {
+    if (event.target === clipOn || event.target === fromInput || event.target === toInput) return;
+    syncCompat();
+    savePrefs();
+  });
+
+  // ---- Clipboard: the Paste button, and filling in a YouTube link you just copied ----
+
+  const YOUTUBE = /^(https?:\/\/)?((www|m|music)\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/\S+$/i;
+  const isYouTube = (text) => {
+    const parts = text.split(/\s+/);
+    return parts.length <= 20 && parts.every((part) => YOUTUBE.test(part));
+  };
+
+  // In the app the clipboard is read by the app (see YTDownloader.swift); in a browser, by the browser.
+  // auto: only when something new was copied, and never asks macOS unless it looks like a link.
+  const clipboardWaiting = new Map();
+  let clipboardRequests = 0;
+  function readClipboard(auto) {
+    if (nativeApp) {
+      return new Promise((resolve) => {
+        const id = ++clipboardRequests;
+        clipboardWaiting.set(id, resolve);
+        window.webkit.messageHandlers.ytdl.postMessage({ action: "readClipboard", id, auto });
+      });
+    }
+    if (!navigator.clipboard || !navigator.clipboard.readText) return Promise.resolve({ text: null });
+    return navigator.clipboard.readText().then((text) => ({ text }), () => ({ text: null, denied: true }));
+  }
+  window.ytdlClipboard = (id, text, denied) => {
+    const resolve = clipboardWaiting.get(id);
+    clipboardWaiting.delete(id);
+    if (resolve) resolve({ text, denied });
+  };
+
+  let lastClipboard = null;  // the clipboard text we last looked at
+  let filledIn = "";         // what the app put in the link field (so typing is never overwritten)
+
+  async function checkClipboard() {
+    if (document.hidden) return;
+    const { text } = await readClipboard(true);
+    const link = (text || "").trim();
+    if (!link || link === lastClipboard) return;
+    lastClipboard = link;
+    const current = urlInput.value.trim();
+    if (!isYouTube(link) || current === link || (current && current !== filledIn)) return;
+    urlInput.value = filledIn = link;
+    say("Pasted the YouTube link you copied. Press Download.", "info");
+    urlInput.focus();
+  }
+  urlInput.addEventListener("input", () => { if (msg.dataset.kind === "info") say(""); });
+  // The app calls this when it comes to the front; a browser tab gets focus events.
+  window.ytdlAppActivated = checkClipboard;
+  if (!nativeApp) {
+    window.addEventListener("focus", checkClipboard);
+    document.addEventListener("visibilitychange", checkClipboard);
+  }
+
+  $("paste").addEventListener("click", async () => {
+    const button = $("paste");
+    button.disabled = true;
+    try {
+      const { text, denied } = await readClipboard(false);
+      const link = (text || "").trim();
+      if (link) {
+        urlInput.value = filledIn = lastClipboard = link;
+        say(isYouTube(link) || /^https?:\/\//i.test(link) ? "" : "That doesn't look like a link. Copy the video's link from YouTube.");
+      } else if (denied) {
+        say(nativeApp
+          ? "macOS didn't let 4K YT Downloader read the clipboard. Press ⌘V instead, or allow it in System Settings › Privacy & Security › Paste from Other Apps."
+          : "This browser didn't allow reading the clipboard. Press ⌘V instead, or allow clipboard access for this page.");
+      } else {
+        say("Nothing to paste. Copy a YouTube link first.");
+      }
+    } finally {
+      button.disabled = false;
+      urlInput.focus();
+    }
+  });
+
+  // ---- Clip times ----
+
+  function parseTime(value) {
+    const text = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+    if (!text) return null;
+    if (/^\d+(\.\d+)?$/.test(text)) return parseFloat(text);
+    let m = text.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
+    if (m) {
+      const hours = +(m[1] || 0), minutes = +m[2], seconds = parseFloat(m[3]);
+      if ((m[1] && minutes >= 60) || seconds >= 60) throw new Error(`“${text}” isn't a valid time.`);
+      return hours * 3600 + minutes * 60 + seconds;
+    }
+    m = text.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?$/);
+    if (m && (m[1] || m[2] || m[3])) return +(m[1] || 0) * 3600 + +(m[2] || 0) * 60 + parseFloat(m[3] || 0);
+    throw new Error(`“${text}” isn't a time. Use minutes:seconds, like 1:30 or 1:02:45.`);
+  }
+  function fmtTime(seconds) {
+    seconds = Math.round(seconds * 10) / 10;
+    const whole = Math.floor(seconds), tenths = Math.round((seconds - whole) * 10);
+    const h = Math.floor(whole / 3600), m = Math.floor((whole % 3600) / 60), s = String(whole % 60).padStart(2, "0");
+    return (h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`) + (tenths ? `.${tenths}` : "");
+  }
+
+  // Returns {start, end} in seconds (null = from the beginning / to the end), or throws.
+  function clipTimes() {
+    let start, end;
+    fromInput.classList.remove("bad");
+    toInput.classList.remove("bad");
+    try { start = parseTime(fromInput.value); } catch (error) { fromInput.classList.add("bad"); throw error; }
+    try { end = parseTime(toInput.value); } catch (error) { toInput.classList.add("bad"); throw error; }
+    if (start != null && end != null && end <= start) {
+      toInput.classList.add("bad");
+      throw new Error("The end time must be after the start time.");
+    }
+    return { start: start || null, end };
+  }
+  function showClipInfo() {
+    clipInfo.classList.remove("bad");
+    try {
+      const { start, end } = clipTimes();
+      clipInfo.textContent =
+        start == null && end == null ? "Type times like 1:30 or 1:02:45"
+        : end == null ? `From ${fmtTime(start)} to the end`
+        : `Clip length ${fmtTime(end - (start || 0))}`;
+    } catch (error) {
+      clipInfo.textContent = error.message;
+      clipInfo.classList.add("bad");
+    }
+  }
+  clipOn.addEventListener("change", () => {
+    $("times").hidden = !clipOn.checked;
+    showClipInfo();
+    if (clipOn.checked) fromInput.focus();
+  });
+  fromInput.addEventListener("input", showClipInfo);
+  toInput.addEventListener("input", showClipInfo);
+
+  const clipLabel = (job) => job.start == null && job.end == null ? null
+    : `Clip ${fmtTime(job.start || 0)}–${job.end == null ? "end" : fmtTime(job.end)}`;
+
+  // ---- Downloading ----
+
+  async function post(path, data) {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Something went wrong.");
+    return body;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const urls = urlInput.value.trim();
+    say("");
+    if (!urls) { urlInput.focus(); return; }
+    let times = { start: null, end: null };
+    if (clipOn.checked) {
+      try { times = clipTimes(); } catch (error) { say(error.message); return; }
+      if (times.start == null && times.end == null) {
+        say("Type a start or an end time, or untick “Download only part of the video”.");
+        fromInput.focus();
+        return;
+      }
+    }
+    go.disabled = true;
+    try {
+      await post("/api/download", { urls, quality: quality(), compat: compat.checked && quality() !== "audio", ...times });
+      urlInput.value = filledIn = "";
+      fromInput.value = toInput.value = "";
+      showClipInfo();
+      refresh();
+    } catch (error) {
+      say(error.message === "Failed to fetch" || error.message === "Load failed" ? offlineText : error.message);
+    } finally {
+      go.disabled = false;
+      urlInput.focus();
+    }
+  });
+
+  // "Change" asks the app for its folder panel; the app calls ytdlFolderChosen(path or null).
+  $("change").addEventListener("click", () => {
+    if (!nativeApp) return;
+    $("change").disabled = true;
+    $("change").textContent = "Choosing…";
+    window.webkit.messageHandlers.ytdl.postMessage({ action: "chooseFolder", current: folderPath });
+  });
+  window.ytdlFolderChosen = async (path) => {
+    try {
+      if (path) {
+        const result = await post("/api/folder", { path });
+        $("folder").textContent = result.folder;
+        folderPath = result.folderPath;
+      }
+    } catch (error) {
+      say(error.message);
+    }
+    $("change").disabled = false;
+    $("change").textContent = "Change";
+  };
+
+  $("clear").addEventListener("click", async () => {
+    for (const [id, card] of cards) {
+      if (!ACTIVE.has(card.dataset.status)) await post("/api/remove", { id }).catch(() => {});
+    }
+    refresh();
+  });
+
+  const fmtBytes = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
+  function fmtEta(s) {
+    s = Math.round(s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = String(s % 60).padStart(2, "0");
+    return (h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`) + " left";
+  }
+  const qualityLabel = { "2160": "4K", "1440": "1440p", "1080": "1080p", "720": "720p", audio: "Audio only" };
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text) node.textContent = text;
+    return node;
+  }
+
+  function makeCard(job) {
+    const card = el("article", "job");
+    const thumb = el("div", "thumb");
+    const body = el("div", "body");
+    const title = el("div", "title"), meta = el("div", "meta"), status = el("div", "status");
+    const track = el("div", "track"), fill = el("div", "fill");
+    track.append(fill);
+    body.append(title, meta, track, status);
+    const actions = el("div", "actions");
+    card.append(thumb, body, actions);
+    card.parts = { thumb, title, meta, status, track, fill, actions };
+    return card;
+  }
+
+  function button(label, onClick) {
+    const b = el("button", "ghost", label);
+    b.type = "button";
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function render(job) {
+    let card = cards.get(job.id);
+    if (!card) {
+      card = makeCard(job);
+      cards.set(job.id, card);
+    }
+    const p = card.parts;
+    card.className = "job " + job.status;
+    const statusChanged = card.dataset.status !== job.status;
+    card.dataset.status = job.status;
+    const clip = clipLabel(job);
+
+    p.title.textContent = job.title || job.url;
+    p.title.title = job.title || job.url;
+    const settings = [qualityLabel[job.quality], job.compat ? "H.264" : null, clip].filter(Boolean).join(" · ");
+    p.meta.textContent = [job.details, settings].filter(Boolean).join("  —  ");
+    if (job.thumbnail && job.thumbnail.startsWith("https://") && p.thumb.dataset.src !== job.thumbnail) {
+      p.thumb.dataset.src = job.thumbnail;
+      p.thumb.style.backgroundImage = `url("${job.thumbnail.replace(/"/g, "%22")}")`;
+    }
+
+    const pct = job.progress == null ? null : Math.round(job.progress * 100);
+    const busy = job.status === "starting" || job.status === "finishing" || (ACTIVE.has(job.status) && pct == null);
+    p.track.classList.toggle("busy", busy);
+    p.fill.style.width = (pct ?? 0) + "%";
+
+    let text = "";
+    if (job.status === "starting") text = "Getting video info…";
+    else if (job.status === "downloading") {
+      text = [`Downloading ${job.part || (clip ? "clip" : "video")}`, pct != null ? pct + "%" : null,
+              job.speed ? fmtBytes(job.speed) + "/s" : null, job.eta ? fmtEta(job.eta) : null].filter(Boolean).join(" · ");
+    }
+    else if (job.status === "finishing") text = job.quality === "audio" || clip ? "Finishing…" : "Merging video and audio…";
+    else if (job.status === "converting") text = `Converting to H.264 · ${pct ?? 0}%` + (clip ? "" : " · this can take a while");
+    else if (job.status === "done") text = job.files.map((f) => `Saved · ${f.info}`).join("  ") || "Saved";
+    else if (job.status === "error") text = job.error || "Download failed.";
+    else if (job.status === "cancelled") text = clip ? "Cancelled." : "Cancelled. Retry to resume where it stopped.";
+    p.status.textContent = text;
+    p.status.title = job.files.map((f) => f.name).join("\n") || text;
+
+    if (statusChanged) {
+      p.actions.replaceChildren();
+      if (ACTIVE.has(job.status)) {
+        p.actions.append(button("Cancel", () => post("/api/cancel", { id: job.id }).then(refresh).catch(() => {})));
+      } else if (job.status === "done") {
+        p.actions.append(button("Show in Finder", () => post("/api/reveal", { id: job.id }).catch(() => {})));
+      } else {
+        p.actions.append(button("Retry", async () => {
+          await post("/api/download", { urls: job.url, quality: job.quality, compat: job.compat, start: job.start, end: job.end }).catch(() => {});
+          await post("/api/remove", { id: job.id }).catch(() => {});
+          refresh();
+        }));
+      }
+    }
+    return card;
+  }
+
+  let timer = null;
+  async function refresh() {
+    clearTimeout(timer);
+    let active = false;
+    try {
+      const res = await fetch("/api/state", { cache: "no-store" });
+      const state = await res.json();
+      $("folder").textContent = state.folder;
+      folderPath = state.folderPath;
+      $("change").hidden = !(state.canChange && nativeApp);
+      const seen = new Set();
+      state.jobs.forEach((job, index) => {
+        const card = render(job);
+        seen.add(job.id);
+        if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+        if (ACTIVE.has(job.status)) active = true;
+      });
+      for (const [id, card] of cards) {
+        if (!seen.has(id)) { card.remove(); cards.delete(id); }
+      }
+      $("empty").hidden = state.jobs.length > 0;
+      $("list-head").hidden = state.jobs.length === 0;
+      if (msg.dataset.offline) { say(""); }
+    } catch {
+      msg.textContent = offlineText;
+      msg.dataset.kind = "error";
+      msg.dataset.offline = "1";
+    }
+    timer = setTimeout(refresh, active ? 700 : 2500);
+  }
+
+  loadPrefs();
+  refresh();
+  checkClipboard();
+</script>
+</body>
+</html>
